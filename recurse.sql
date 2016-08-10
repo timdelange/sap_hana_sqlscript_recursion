@@ -1,4 +1,3 @@
-
 CREATE PROCEDURE RECURSE_ASSEMBLIES_INTO_PARTS () 
 LANGUAGE SQLSCRIPT AS 
 	new_count    integer  := 1;
@@ -7,11 +6,7 @@ LANGUAGE SQLSCRIPT AS
 BEGIN
 
 	DELETE FROM T3;
-	-- this handles the no REVOZ exception
-	INSERT INTO "T3" 
-		SELECT ID_CAR, ID_PARTS AS PARENT_ID, ID_PARTS AS PARTS_ELEM, 0 AS LEVEL, 'D' as S_STAT 
-		FROM t1
-		WHERE t1.RECEP_UNIT != 'REVOZ'	;
+
 	
 	-- parts (not assemblies) entries in T1
 	INSERT INTO "T3"
@@ -20,10 +15,11 @@ BEGIN
 		LEFT OUTER JOIN T2
 		ON T1.ID_PARTS = T2.ID_PARTS_PARENT
 		WHERE ID_PARTS_PARENT is null
+		AND t1.RECEP_UNIT = 'REVOZ'	
         ;
 	
 	
-	-- first round of assembly entries 
+	-- first round of assembly entries (those mentioned in T1)
 	INSERT INTO "T3"
 		SELECT ID_CAR, ID_PARTS_PARENT, ID_PARTS_CHILD, 1 AS r_level, 'U' AS S_STAT 
 		FROM T1 
@@ -32,9 +28,11 @@ BEGIN
 		WHERE ID_PARTS_PARENT is not null
 		AND T1.DATE_TCM > T2.DATE_VALIDITY_START
 		AND T1.DATE_TCM < T2.DATE_VALIDITY_END
+		AND T1.RECEP_UNIT = 'REVOZ'	
         ;
         
-    -- here we resolve assemblies using status column to track if we have resolved an assembly or not
+    -- here we resolve assemblies by repeatedly running a self join
+    -- using a status column to track if we have already resolved an assembly or not
 	r_level := 1;
     SELECT COUNT(*) into new_count FROM T3 WHERE S_STAT = 'U';
 	WHILE :new_count > 0 DO
@@ -58,9 +56,16 @@ BEGIN
 		 SELECT COUNT(*) into new_count FROM T3 WHERE S_STAT = 'U';
 	END WHILE;
 	
+	-- this handles the no REVOZ exception
+	INSERT INTO "T3" 
+		SELECT ID_CAR, ID_PARTS AS PARENT_ID, ID_PARTS AS PARTS_ELEM, 0 AS LEVEL, 'D' as S_STAT 
+		FROM t1
+		WHERE t1.RECEP_UNIT != 'REVOZ'	;
 	
+	--Remove Nodes
+	DELETE FROM T3 WHERE PARTS_ELEM IN (SELECT T2.ID_PARTS_PARENT from T2);
 	
-	select * from t3;
+	SELECT CAR_ID, PARENT_ID,PARTS_ELEM, LEVEL from T3;
 END;
 
 CALL RECURSE_ASSEMBLIES_INTO_PARTS ();
